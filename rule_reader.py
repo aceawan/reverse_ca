@@ -32,7 +32,7 @@ if __name__ == "__main__":
 		sys.exit(1)
 
 	dat_path = str(sys.argv[1])
-	rule_number = int(sys.argv[2])
+	rule_number = int(sys.argv[2]) - 1
 
 	f = open(dat_path, "rb")
 	raw_data = f.read()
@@ -47,7 +47,7 @@ if __name__ == "__main__":
 	print("{} reversible rules".format(n_rules))
 
 	if rule_number >= n_rules:
-		print('You want the rule {} but we only have {} rules'.format(rule_number, n_rules))
+		print('we only have {} rules'.format(n_rules))
 		exit(2)
 
 	nb_config = n_state ** n_vois

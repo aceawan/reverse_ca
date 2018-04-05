@@ -42,8 +42,8 @@ struct RulesList {
 RulesList rules_list = void;
 
 void main(){
-    enum n_state = 3;
-    enum n_vois = 2;
+    enum n_state = 2;
+    enum n_vois = 4;
 
     Graph edges_order;
     Graph g;
@@ -83,19 +83,17 @@ void computeReversibles(ulong graph_size, string order_file_path, string result_
 void enumerateReversible(Graph setted_edges, Edge[] order, int stage, int n_state, Graph injectivity_graph, bool[][] reachability_matrix, int number_one_left = 4, int number_zero_left = 4){
     if(stage < order.length){
         foreach(i; 0..n_state){
-            if(stage < 12)
-                //writefln("edges setted = %d/%d\tstate = %d", stage, order.length, i);
+            setted_edges[order[stage][0]][order[stage][1]] = i;
 
-                setted_edges[order[stage][0]][order[stage][1]] = i;
-
-                if(!isNonReversible(setted_edges, injectivity_graph, reachability_matrix))
-                    enumerateReversible(setted_edges, order, stage+1, n_state, injectivity_graph, reachability_matrix);
+            if(!isNonReversible(setted_edges, injectivity_graph, reachability_matrix))
+                enumerateReversible(setted_edges, order, stage+1, n_state, injectivity_graph, reachability_matrix);
         }
 
         setted_edges[order[stage][0]][order[stage][1]] = -1;
 
     }
     else{
+        graphToDot(setted_edges, "exemple.dot");
         writeRule(setted_edges);
     }
 }
