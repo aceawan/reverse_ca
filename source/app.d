@@ -15,163 +15,245 @@ import msgpack;
 *  -1 if there is no edge between i and j.
 */
 
-alias Graph = int[][];
+enum n_state = 2;
+enum n_vois = 3;
+enum n_nodes_debruijn = n_state ^^ (n_vois - 1);
+enum n_nodes_injectivity = n_nodes_debruijn * n_nodes_debruijn;
+enum n_voisinages = n_state ^^ n_vois;
+enum nb_in_image_max = n_voisinages / n_state;
+
+alias Graph = int[n_nodes_debruijn][n_nodes_debruijn];
+alias InjectivityGraph = int[n_nodes_injectivity][n_nodes_injectivity];
 alias Edge = Tuple!(int,int);
-alias Rule = int[];
+alias Rule = int[n_voisinages];
+
+Graph de_bruijn_graph;
+Graph edges_order;
+Graph s_edges;
+int[n_state] nb_in_image;
+InjectivityGraph injectivity_graph;
+Edge[] order;
 
 struct RulesList {
-    int n_state;
-    int n_vois;
-    int n_rules;
+    int nb_state;
+    int nb_vois;
+    int nb_rules;
 
     Rule[] rules;
 
-    this(int states, int vois){
-        rules = new Rule[](0,0);
-        n_state = states;
-        n_vois = vois;
-        n_rules = 0;
+    this(size_t preallocated_size){
+        rules = new int[n_voisinages][](preallocated_size);
+        nb_state = n_state;
+        nb_vois = n_vois;
+        nb_rules = 0;
     }
 
     void addRule(Rule rule){
-        n_rules++;
+        nb_rules++;
         rules ~= rule;
+    }
+}
+
+struct Stack(size_t size){
+    int[size] t;
+    int pos = 0;
+
+    @property
+    bool empty(){
+        return pos == 0;
+    }
+
+    @property
+    int pop(){
+        return t[--pos];
+    }
+
+    void push(int x){
+        t[pos++] = x;
     }
 }
 
 RulesList rules_list = void;
 
 void main(){
-    enum n_state = 2;
-    enum n_vois = 4;
+    pragma(msg, "number of states = ", n_state);
+    pragma(msg, "number of neighbours = ", n_vois);
+    pragma(msg, "number of DeBruijn nodes = ", n_nodes_debruijn);
+    pragma(msg, "number of neighbourhoods = ", n_voisinages);
+    pragma(msg, "number of state in image max = ", nb_in_image_max);
 
-    Graph edges_order;
-    Graph g;
-
-    g = createDeBruijn!(n_state, n_vois);
-
-    edges_order = maxCycleNodeOrder(g);
-    graphToDot(g, format("v%ds%d.dot", n_state, n_vois));
-    graphToDot(edges_order, format("v%ds%d_order.dot", n_state, n_vois));
-    orderToCSV(edges_order, format("v%ds%d_order.csv", n_state, n_vois));
-    computeReversibles(g.length, format("v%ds%d_order.csv", n_state, n_vois), format("v%ds%d.dat", n_vois, n_state), n_state, n_vois);
-}
-
-void computeReversibles(ulong graph_size, string order_file_path, string result_file_path, int n_state, int n_vois){
-    auto file = File(order_file_path, "r");
-    auto order = file.byLine.joiner("\n").csvReader!(Tuple!(int,int)).array;
-
-    rules_list = RulesList(n_state, n_vois); 
-
-    Graph injectivity_graph = new int[][](graph_size ^^ 2, graph_size ^^ 2);
-    Graph setted_edges = new int[][](graph_size, graph_size);
-    bool[][] reachability_matrix = new bool[][](graph_size ^^ 2 , graph_size ^^ 2);
-
-    foreach(i; 0..setted_edges.length){
-        foreach(j; 0..setted_edges.length){
-            setted_edges[i][j] = -1;
-        }
-    }
-
-    enumerateReversible(setted_edges, order, 0, n_state, injectivity_graph, reachability_matrix);
-
-    ubyte[] result = pack(rules_list);
-
-    std.file.write(result_file_path, result);
-}
-
-void enumerateReversible(Graph setted_edges, Edge[] order, int stage, int n_state, Graph injectivity_graph, bool[][] reachability_matrix, int number_one_left = 4, int number_zero_left = 4){
-    if(stage < order.length){
-        foreach(i; 0..n_state){
-            setted_edges[order[stage][0]][order[stage][1]] = i;
-
-            if(!isNonReversible(setted_edges, injectivity_graph, reachability_matrix))
-                enumerateReversible(setted_edges, order, stage+1, n_state, injectivity_graph, reachability_matrix);
-        }
-
-        setted_edges[order[stage][0]][order[stage][1]] = -1;
-
-    }
-    else{
-        graphToDot(setted_edges, "exemple.dot");
-        writeRule(setted_edges);
-    }
-}
-
-void writeRule(Graph setted_edges){
-    int n_nodes_debruijn = rules_list.n_state ^^ (rules_list.n_vois - 1);
-    int[] rule;
-
-    for(int i = 0; i < n_nodes_debruijn; i++){
-        for(int j = 0; j < rules_list.n_state; j++){
-            rule ~= setted_edges[i][((i * rules_list.n_state) + j) % n_nodes_debruijn];
-        }
-    }
-
-    rules_list.addRule(rule);
-}
-
-bool isNonReversible(Graph setted_edges, Graph injectivity_graph, bool[][] reachability_matrix){
-    foreach(i; 0..injectivity_graph.length){
-        foreach(j; 0..injectivity_graph.length){
-            injectivity_graph[i][j] = -1;
-        }
-    }
-
-    foreach(i; 0..setted_edges.length){
-        foreach(j; 0..setted_edges.length){
-            foreach(i_prime; 0..setted_edges.length){
-                foreach(j_prime; 0..setted_edges.length){
-                    if(setted_edges[i][j] > -1 && setted_edges[i_prime][j_prime] > -1 && setted_edges[i][j] == setted_edges[i_prime][j_prime] && (i != i_prime || j != j_prime)){
-                        injectivity_graph[i * setted_edges.length + i_prime][j * setted_edges.length + j_prime] = 0;
-                    }
-                }
-            }
-        }
-    }
-
-    auto reachability_matrix_p = reachabilityMatrix(injectivity_graph, reachability_matrix);
-
-    foreach(i; 0..reachability_matrix.length){
-        if(reachability_matrix_p[i][i]){
-            return true;
-        }
-    }
-
-    return false;
-
-}
-
-/**
-* Create the DeBruijn graph for a neighbourhood size and a number of states
-* Params:
-*  n_state = number of states
-*  n_vois = size of the neighbourhood
-* Returns: $(DB_GRAPH)
-*/
-Graph createDeBruijn(int n_state, int n_vois)(){
-    enum n_nodes_debruijn = n_state ^^ (n_vois - 1);
-    Graph graph = new int[][](n_nodes_debruijn, n_nodes_debruijn);
-    
-    // At first, there are no edges
-    setGraph(graph, -1);
 
     // For each node represented by the digits x0x1...xN in base n_state
     // There is an edge to the node represented by the digits x1x2...j for
     // each j between 0 and (n_state -1).
+    /*
     for(int i = 0; i < n_nodes_debruijn; i++){
+        de_bruijn_graph[i][] = -1;
         for(int j = 0; j < n_state; j++){
             // 1. We multiply the number in base n_state by n_state to shift
             //  the digits from 1 to the left
             // 2. We add j to set the rightmost digit
             // 3. We apply module n_nodes_debruijn to "forget" the leftmost
             //  digit 
-            graph[i][((i * n_state) + j) % n_nodes_debruijn] = j;
+            de_bruijn_graph[i][((i * n_state) + j) % n_nodes_debruijn] = j;
+        }
+    }
+    */
+
+    //graphToDot(de_bruijn_graph, format("v%ds%d.dot", n_vois, n_state));
+
+    /*
+    maxCycleNodeOrder();
+    graphToDot(edges_order, format("v%ds%d_order.dot", n_vois, n_state));
+    orderToCSV(edges_order, format("v%ds%d_order.csv", n_vois, n_state));
+    */
+
+    //computeReversibles(g.length, format("v%ds%d_order.csv", n_state, n_vois), format("v%ds%d.dat", n_vois, n_state), n_state, n_vois);
+
+    // Énumération des réversibles
+    // Récupération de l'ordre et initialisation des structures
+    auto order_file = File(format("v%ds%d_order.csv", n_vois, n_state), "r");
+    order = order_file.byLine.joiner("\n").csvReader!(Tuple!(int,int)).array;
+
+    writefln("number of edges : %d", order.length);
+    rules_list = RulesList(0);
+
+    foreach(i; 0..n_nodes_debruijn){
+        s_edges[i][] = -1;
+    }
+
+    // Énumération en elle-même
+    int stage = 0;
+
+    while(stage != -1){
+        int x = s_edges[order[stage][0]][order[stage][1]];
+        x++;
+
+        if(x == n_state){
+            s_edges[order[stage][0]][order[stage][1]] = -1;
+            stage--;
+        }
+        else{
+            s_edges[order[stage][0]][order[stage][1]] = x;
+
+            if( !isNonReversible(stage + 1) ){
+                stage++;
+
+                if(stage == order.length){
+
+                    /* Comment this part when benchmarking */
+
+                    //writeln("== RÉVERSIBLE ==");
+                    //writeRule();
+
+                    /* End of part to comment when benchmarking */
+
+                    stage--;
+                }
+            }
         }
     }
 
-    return graph;
+    ubyte[] result = pack(rules_list);
+    std.file.write(format("v%ds%d.dat", n_vois, n_state), result);
 }
+
+
+bool isNonReversible(int stage){
+    int[n_nodes_injectivity] deg_entrant;
+    int[n_nodes_injectivity] deg_sortant;
+
+    // Filling the injectivity graph
+    foreach(i; 0..injectivity_graph.length){
+        injectivity_graph[i][] = 0;
+    }
+
+    foreach(e; 0..stage){
+        foreach(e_prime; 0..stage){
+            if(s_edges[order[e][0]][order[e][1]] != s_edges[order[e_prime][0]][order[e_prime][1]] || e == e_prime) continue;
+
+            int i = order[e][0] * n_nodes_debruijn + order[e_prime][0];
+            int j = order[e][1] * n_nodes_debruijn + order[e_prime][1];
+            injectivity_graph[i][j] = 1;
+            deg_entrant[j]++;
+            deg_sortant[i]++;
+        }
+    }
+
+    // Deleting all sinks from the graph
+    auto s_sinks = Stack!n_nodes_injectivity();
+    auto s_source = Stack!n_nodes_injectivity();
+
+    foreach(i; 0..n_nodes_injectivity){
+        if(deg_sortant[i] == 0)
+            s_sinks.push(i);
+        if(deg_entrant[i] == 0)
+            s_source.push(i);
+    }
+
+    while(!s_sinks.empty){
+        int i = s_sinks.pop;
+        foreach(k; 0..n_nodes_injectivity){
+            if(injectivity_graph[k][i] == 1){
+                deg_sortant[k]--;
+                if(deg_sortant[k] == 0){
+                    s_sinks.push(k);
+                }
+            }
+        }
+    }
+
+    while(!s_source.empty){
+        int i = s_source.pop;
+        foreach(k; 0..n_nodes_injectivity){
+            if(injectivity_graph[i][k] == 1){
+                deg_entrant[k]--;
+                if(deg_entrant[k] == 0){
+                    s_source.push(k);
+                }
+            }
+        }
+    }
+
+    foreach(i; 0..n_nodes_injectivity){
+        foreach(j; 0..n_nodes_injectivity){
+            if(deg_sortant[i] != 0 || deg_entrant[i] != 0 && i !=j && injectivity_graph[i][j] == 1){
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+void writeRule(){
+    int[n_voisinages] rule;
+
+    for(int i = 0; i < n_nodes_debruijn; i++){
+        for(int j = 0; j < n_state; j++){
+            rule[((i * n_state) + j)] = s_edges[i][((i * n_state) + j) % n_nodes_debruijn];
+        }
+    }
+
+    rules_list.addRule(rule);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 /**
 * From a DeBruijn graph, compute the order in which the values of the edges should be 
@@ -180,33 +262,37 @@ Graph createDeBruijn(int n_state, int n_vois)(){
 * Params:
 *   graph = $(DB_GRAPH)
 * Returns: A graph where each edge is labelled with its order
-*/
-Graph maxCycleNodeOrder(Graph graph){
+*/  
+void maxCycleNodeOrder(){
     // We will keep track of the edges whose values have already been setted in 
     // this graph, and their order
-    Graph setted_edges = new int[][] (graph.length, graph.length);
+    int[][] setted_edges = new int[][] (n_nodes_debruijn, n_nodes_debruijn);
     setGraph(setted_edges, -1);
 
     int edges_in_cyles = 0;
     int next_edge_to_add = 0;
 
-    for(int csize = 1; csize <= graph.length; csize++){
-        writefln("csize = %d and graph.length = %d", csize, graph.length);
+    for(int csize = 1; csize <= n_nodes_debruijn; csize++){
+        writefln("csize = %d and graph.length = %d", csize, n_nodes_debruijn);
         foreach(i; 0..csize+1){
-            nCycle(graph, setted_edges, next_edge_to_add, edges_in_cyles, csize);
+            nCycle(setted_edges, next_edge_to_add, edges_in_cyles, csize);
         }
     }
 
     foreach(i; 0..setted_edges.length){
         foreach(j; 0..setted_edges.length){
-            if(graph[i][j] > -1 && setted_edges[i][j] == -1){
+            if(de_bruijn_graph[i][j] > -1 && setted_edges[i][j] == -1){
                 setted_edges[i][j] = next_edge_to_add;
                 next_edge_to_add++;
             }
         }
     }
 
-    return setted_edges;
+    foreach(i; 0..n_nodes_debruijn){
+        foreach(j; 0..n_nodes_debruijn){
+            edges_order[i][j] = setted_edges[i][j];
+        }
+    }
 }
 
 /**
@@ -226,7 +312,8 @@ Graph maxCycleNodeOrder(Graph graph){
 *
 * Returns: a boolean, true if the function has added one or more cycles of size n
 */
-bool nCycle(Graph db_graph, Graph setted_edges, ref int next_edge_to_add, ref int edges_in_cycles, int edges_to_add, ulong starting_vertex = -1){
+
+bool nCycle(int[][] setted_edges, ref int next_edge_to_add, ref int edges_in_cycles, int edges_to_add, ulong starting_vertex = -1){
     bool changed = true;
     bool success = false;
 
@@ -236,12 +323,12 @@ bool nCycle(Graph db_graph, Graph setted_edges, ref int next_edge_to_add, ref in
         if(starting_vertex == -1){
             foreach(i; 0..setted_edges.length){
                 foreach(j; 0..setted_edges.length){
-                    if(db_graph[i][j] > -1 && setted_edges[i][j] == -1){
+                    if(de_bruijn_graph[i][j] > -1 && setted_edges[i][j] == -1){
                         setted_edges[i][j] = next_edge_to_add;
                         next_edge_to_add++;
 
                         if(edges_to_add > 1){
-                            bool next_edge_success = nCycle(db_graph, setted_edges, next_edge_to_add, edges_in_cycles, edges_to_add - 1, j);
+                            bool next_edge_success = nCycle(setted_edges, next_edge_to_add, edges_in_cycles, edges_to_add - 1, j);
 
                             if(next_edge_success){
                                 changed = true; //
@@ -271,12 +358,12 @@ bool nCycle(Graph db_graph, Graph setted_edges, ref int next_edge_to_add, ref in
         }
         else{
             foreach(i; 0..setted_edges.length){
-                if(db_graph[starting_vertex][i] > -1 && setted_edges[starting_vertex][i] == -1){
+                if(de_bruijn_graph[starting_vertex][i] > -1 && setted_edges[starting_vertex][i] == -1){
                     setted_edges[starting_vertex][i] = next_edge_to_add;
                     next_edge_to_add++;
 
                     if(edges_to_add > 1){
-                        bool next_edge_success = nCycle(db_graph, setted_edges, next_edge_to_add, edges_in_cycles, edges_to_add - 1, i);
+                        bool next_edge_success = nCycle(setted_edges, next_edge_to_add, edges_in_cycles, edges_to_add - 1, i);
 
                         if(next_edge_success){
                             changed = true;
@@ -316,7 +403,7 @@ bool nCycle(Graph db_graph, Graph setted_edges, ref int next_edge_to_add, ref in
 * 
 * Returns: the number of edges that are part of a cycle
 */
-int nbEdgesInCycles(Graph graph){
+int nbEdgesInCycles(int[][] graph){
     int nbEdgesInCycles = 0;
 
     auto reachability_matrix = reachabilityMatrix(graph);
@@ -357,7 +444,7 @@ unittest{
 * 
 * Returns: a reachability matrix as a 2D-array of booleans 
 */
-bool[][] reachabilityMatrix(Graph g, bool[][] reachability_matrix = null){    
+bool[][] reachabilityMatrix(int[][] g, bool[][] reachability_matrix = null){    
     if(reachability_matrix is null)
         reachability_matrix = new bool[][](g.length, g.length);
 
@@ -398,6 +485,7 @@ bool[][] reachabilityMatrix(Graph g, bool[][] reachability_matrix = null){
     return reachability_matrix;
 }
 
+
 unittest{
     Graph g = [[-1, -1], [-1, -1]];
     assert(reachabilityMatrix(g) == [[false, false], [false, false]]);
@@ -412,7 +500,7 @@ unittest{
 *   g = a Graph
 *   value = an integer value
 */
-void setGraph(Graph g, int value){
+void setGraph(int[][] g, int value){
     for(int i = 0; i < g.length; i++){
         for(int j = 0; j < g.length; j++){
             g[i][j] = value;
@@ -442,6 +530,7 @@ void orderToCSV(Graph order, string path){
 *  path = path of the dot file
 */
 void graphToDot(int base = 0)(Graph graph, string path){
+    writefln("writing %s", path);
     auto f = File(path, "w");
 
     f.writeln("digraph DeBruijn {");
