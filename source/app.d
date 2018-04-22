@@ -5,8 +5,8 @@ import std.algorithm;
 import std.array;
 import std.typecons;
 import std.file;
-
-import msgpack;
+import std.conv;
+import std.datetime.stopwatch;
 
 /**
 * Macros:
@@ -20,7 +20,6 @@ enum n_vois = 3;
 enum n_nodes_debruijn = n_state ^^ (n_vois - 1);
 enum n_nodes_injectivity = n_nodes_debruijn * n_nodes_debruijn;
 enum n_voisinages = n_state ^^ n_vois;
-enum nb_in_image_max = n_voisinages / n_state;
 
 alias Graph = int[n_nodes_debruijn][n_nodes_debruijn];
 alias InjectivityGraph = int[n_nodes_injectivity][n_nodes_injectivity];
@@ -30,7 +29,6 @@ alias Rule = int[n_voisinages];
 Graph de_bruijn_graph;
 Graph edges_order;
 Graph s_edges;
-int[n_state] nb_in_image;
 InjectivityGraph injectivity_graph;
 Edge[] order;
 
@@ -38,7 +36,8 @@ struct RulesList {
     int nb_state;
     int nb_vois;
     int nb_rules;
-
+    ulong computation_time;
+    
     Rule[] rules;
 
     this(size_t preallocated_size){
@@ -80,8 +79,8 @@ void main(){
     pragma(msg, "number of neighbours = ", n_vois);
     pragma(msg, "number of DeBruijn nodes = ", n_nodes_debruijn);
     pragma(msg, "number of neighbourhoods = ", n_voisinages);
-    pragma(msg, "number of state in image max = ", nb_in_image_max);
 
+    auto sw = StopWatch(AutoStart.no);
 
     // For each node represented by the digits x0x1...xN in base n_state
     // There is an edge to the node represented by the digits x1x2...j for
@@ -108,8 +107,6 @@ void main(){
     orderToCSV(edges_order, format("v%ds%d_order.csv", n_vois, n_state));
     */
 
-    //computeReversibles(g.length, format("v%ds%d_order.csv", n_state, n_vois), format("v%ds%d.dat", n_vois, n_state), n_state, n_vois);
-
     // Énumération des réversibles
     // Récupération de l'ordre et initialisation des structures
     auto order_file = File(format("v%ds%d_order.csv", n_vois, n_state), "r");
@@ -123,8 +120,10 @@ void main(){
     }
 
     // Énumération en elle-même
+    sw.start(); // clock
     int stage = 0;
 
+    int nb_rules = 0;
     while(stage != -1){
         int x = s_edges[order[stage][0]][order[stage][1]];
         x++;
@@ -142,9 +141,9 @@ void main(){
                 if(stage == order.length){
 
                     /* Comment this part when benchmarking */
-
+                    nb_rules++;
                     //writeln("== RÉVERSIBLE ==");
-                    //writeRule();
+                    writeRule();
 
                     /* End of part to comment when benchmarking */
 
@@ -152,10 +151,29 @@ void main(){
                 }
             }
         }
+
     }
 
-    ubyte[] result = pack(rules_list);
-    std.file.write(format("v%ds%d.dat", n_vois, n_state), result);
+    writefln("nb de réversibles : %d", nb_rules);
+    sw.stop();
+
+    rules_list.computation_time = sw.peek.total!"seconds";
+
+    writefln("computation took %s", sw.peek);
+
+    // The file is as follow : 
+    //  - the number of states
+    //  - the size of the neighborhood
+    //  - the rules
+    File f = File(format("v%ds%d.dat", n_vois, n_state), "w");
+    f.write(n_state);
+    f.write(n_vois);
+
+    foreach(i; 0..rules_list.nb_rules){
+        foreach(e; rules_list.rules[i]){
+            f.write(e);
+        }
+    }
 }
 
 
@@ -170,7 +188,7 @@ bool isNonReversible(int stage){
 
     foreach(e; 0..stage){
         foreach(e_prime; 0..stage){
-            if(s_edges[order[e][0]][order[e][1]] != s_edges[order[e_prime][0]][order[e_prime][1]] || e == e_prime) continue;
+            if(s_edges[order[e][0]][order[e][1]] != s_edges[order[e_prime][0]][order[e_prime][1]]) continue;
 
             int i = order[e][0] * n_nodes_debruijn + order[e_prime][0];
             int j = order[e][1] * n_nodes_debruijn + order[e_prime][1];
@@ -215,14 +233,15 @@ bool isNonReversible(int stage){
         }
     }
 
-    foreach(i; 0..n_nodes_injectivity){
-        foreach(j; 0..n_nodes_injectivity){
-            if(deg_sortant[i] != 0 || deg_entrant[i] != 0 && i !=j && injectivity_graph[i][j] == 1){
-                return true;
+    foreach(i; 0..n_nodes_debruijn){
+        foreach(j; 0..n_nodes_debruijn){
+            if(i != j){
+                if(deg_entrant[i * n_nodes_debruijn + j] > 0 && deg_sortant[i * n_nodes_debruijn + j] > 0){
+                    return true;
+                }
             }
         }
     }
-
     return false;
 }
 
@@ -549,5 +568,31 @@ void graphToDot(int base = 0)(Graph graph, string path){
         }
     }
 
+    f.writeln("}");
+}
+
+// Write injectivity graph
+void injectivityToDot(int[n_nodes_injectivity][n_nodes_injectivity] inj, string path){
+    auto f = File(path, "w");
+
+    f.writeln("digraph injectivity {");
+
+    foreach(i; 0..n_nodes_debruijn){
+        foreach(j; 0..n_nodes_debruijn){
+            f.writefln(`    n%s [shape=record][label="{%s|%s}"];`, i * n_nodes_debruijn + j, i, j);
+        }
+    }
+
+    foreach(i; 0..n_nodes_debruijn){
+        foreach(j; 0..n_nodes_debruijn){
+            foreach(i_prime; 0..n_nodes_debruijn){
+                foreach(j_prime; 0..n_nodes_debruijn){
+                    if(inj[i * n_nodes_debruijn + i_prime][j * n_nodes_debruijn + j_prime] == 1){
+                        f.writefln("\tn%s -> n%s;", i * n_nodes_debruijn + i_prime, j * n_nodes_debruijn + j_prime);
+                    }
+                }
+            }
+        }
+    }
     f.writeln("}");
 }

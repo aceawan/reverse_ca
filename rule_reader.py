@@ -1,6 +1,6 @@
 import sys
-import msgpack
 import string
+import array
 
 digs = string.digits + string.ascii_letters
 
@@ -34,35 +34,40 @@ if __name__ == "__main__":
 
 	dat_path = str(sys.argv[1])
 
-	f = open(dat_path, "rb")
-	raw_data = f.read()
+	f = open(dat_path, "r")
+	n_state = int(f.read(1))
+	n_vois = int(f.read(1))
+	nb_config = n_state ** n_vois
+	n_rules = 0
+	rules = []
 
-	reversible_rules = msgpack.unpackb(raw_data)
+	brule = f.read(nb_config)
+	while brule != "":
+		rule = []
 
-	n_state = reversible_rules[0]
-	n_vois = reversible_rules[1]
-	n_rules = reversible_rules[2]
-	duration = reversible_rules[3]
+		for i in range(0, nb_config):
+			rule.append(int(brule[i]))
+
+		rules.append(rule)
+		n_rules = n_rules + 1
+		brule = f.read(nb_config)
 
 	print("{} states and {} neighbours".format(n_state, n_vois))
 	print("{} reversible rules".format(n_rules))
-	print("enumeration lasted {} seconds".format(duration))
 
-
-	nb_config = n_state ** n_vois
 	configs = [format(int2base(x, n_state)).rjust(n_vois, '0') for x in range(0, nb_config)]
 
 	if(len(sys.argv) == 3):
 		rule_number = int(sys.argv[2]) - 1
-		
+
 		if rule_number >= n_rules:
 			print('we only have {} rules'.format(n_rules))
 			exit(2)
 
-		print(reversible_rules[4][rule_number])
-		print(list(zip(configs, reversible_rules[4][rule_number])))
+		print(rules[rule_number])
+		print(list(zip(configs, rules[rule_number])))
 
 	if(len(sys.argv) == 2):
 		for i in range(0, n_rules):
-			print(reversible_rules[4][i])
-			print(list(zip(configs, reversible_rules[4][i])))
+			print(int("".join(map(lambda x : str(x), rules[i][::-1])), 2))
+			#print(list(zip(configs, reversible_rules[4][i])))
