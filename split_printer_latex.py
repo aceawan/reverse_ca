@@ -113,7 +113,7 @@ if __name__ == "__main__":
 	else:
 		result_file.write("\Edge[labelstyle = {auto=left, fill=none, outer sep = 0.1ex}, color=red](111)(110)")
 	
-	result_file.write("\tikzset{EdgeStyle/.style = {->, bend right=-20}}")
+	result_file.write(r'\tikzset{EdgeStyle/.style = {->, bend right=-20}}')
 
 	if (rule & (1 << 5)) >> 5:
 		result_file.write("\Edge[labelstyle = {auto=left, fill=none, outer sep = 0.1ex}, color=blue](010)(101)")
